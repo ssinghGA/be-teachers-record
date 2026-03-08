@@ -1,6 +1,6 @@
 const express = require('express');
 const {
-    createStudent, getAllStudents, getStudentById, updateStudent, deleteStudent,
+    createStudent, getAllStudents, getStudentById, updateStudent, deleteStudent, checkStudentEmail
 } = require('../controllers/student.controller');
 const { authenticate } = require('../middleware/auth.middleware');
 
@@ -8,6 +8,8 @@ const router = express.Router();
 
 // All student routes require authentication
 router.use(authenticate);
+
+router.post('/check-email', checkStudentEmail);
 
 router.post('/', createStudent);
 router.get('/', getAllStudents);

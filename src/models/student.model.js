@@ -32,10 +32,18 @@ const studentSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        feePerClass: {
+            type: Number,
+            default: 0,
+        },
         teacherId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             required: [true, 'Teacher ID is required'],
+        },
+        userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
         },
         startDate: {
             type: Date,
