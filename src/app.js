@@ -23,9 +23,14 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
+app.get('/', (req, res) => {
+    res.status(200).json({ success: true, message: 'Teacher Management API is running 🚀' });
+});
+
 app.get('/api/health', (req, res) => {
     res.status(200).json({ success: true, message: 'Teacher Management API is running 🚀', timestamp: new Date() });
 });
+
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
