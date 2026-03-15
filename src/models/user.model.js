@@ -55,6 +55,10 @@ const userSchema = new mongoose.Schema(
         profilePhoto: {
             type: String,
         },
+        googleMeetLink: {
+            type: String,
+            trim: true,
+        },
     },
     {
         timestamps: true,

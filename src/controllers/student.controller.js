@@ -104,7 +104,7 @@ const getAllStudents = asyncHandler(async (req, res) => {
 
     const [students, total] = await Promise.all([
         Student.find(filter)
-            .populate('teacherId', 'name email')
+            .populate('teacherId', 'name email googleMeetLink')
             .skip(skip)
             .limit(limit)
             .sort({ createdAt: -1 }),
@@ -125,7 +125,7 @@ const getAllStudents = asyncHandler(async (req, res) => {
 const getStudentById = asyncHandler(async (req, res) => {
     const filter = await getScopeFilter(req.user, { _id: req.params.id });
 
-    const student = await Student.findOne(filter).populate('teacherId', 'name email');
+    const student = await Student.findOne(filter).populate('teacherId', 'name email googleMeetLink');
     if (!student) {
         return sendError(res, 'Student not found or access denied.', 404);
     }

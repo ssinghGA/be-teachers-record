@@ -48,7 +48,7 @@ const getAllReports = asyncHandler(async (req, res) => {
 
     const [reports, total] = await Promise.all([
         Report.find(filter)
-            .populate('teacherId', 'name email')
+            .populate('teacherId', 'name email googleMeetLink')
             .populate('studentId', 'name class')
             .skip(skip)
             .limit(limit)
@@ -70,7 +70,7 @@ const getReportById = asyncHandler(async (req, res) => {
     const filter = await getScopeFilter(req.user, { _id: req.params.id });
 
     const report = await Report.findOne(filter)
-        .populate('teacherId', 'name email')
+        .populate('teacherId', 'name email googleMeetLink')
         .populate('studentId', 'name class');
 
     if (!report) {
@@ -92,7 +92,7 @@ const updateReport = asyncHandler(async (req, res) => {
         filter,
         { $set: req.body },
         { new: true, runValidators: true }
-    ).populate('teacherId', 'name email').populate('studentId', 'name class');
+    ).populate('teacherId', 'name email googleMeetLink').populate('studentId', 'name class');
 
     if (!report) {
         return sendError(res, 'Report not found or access denied.', 404);

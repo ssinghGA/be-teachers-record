@@ -46,7 +46,7 @@ const getAllPayments = asyncHandler(async (req, res) => {
 
     const [payments, total] = await Promise.all([
         Payment.find(filter)
-            .populate('teacherId', 'name email')
+            .populate('teacherId', 'name email googleMeetLink')
             .populate('studentId', 'name class')
             .skip(skip)
             .limit(limit)
@@ -68,7 +68,7 @@ const getPaymentById = asyncHandler(async (req, res) => {
     const filter = await getScopeFilter(req.user, { _id: req.params.id });
 
     const payment = await Payment.findOne(filter)
-        .populate('teacherId', 'name email')
+        .populate('teacherId', 'name email googleMeetLink')
         .populate('studentId', 'name class');
 
     if (!payment) {

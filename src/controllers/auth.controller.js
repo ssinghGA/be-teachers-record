@@ -65,6 +65,7 @@ const register = asyncHandler(async (req, res) => {
                 role: user.role,
                 phone: user.phone,
                 city: user.city,
+                googleMeetLink: user.googleMeetLink,
             },
         },
         'User registered successfully',
@@ -107,6 +108,7 @@ const login = asyncHandler(async (req, res) => {
             city: user.city,
             subjects: user.subjects,
             profilePhoto: user.profilePhoto,
+            googleMeetLink: user.googleMeetLink,
         },
     }, 'Login successful');
 });

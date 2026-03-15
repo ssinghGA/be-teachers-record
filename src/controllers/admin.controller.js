@@ -46,7 +46,7 @@ const getAllStudents = asyncHandler(async (req, res) => {
 
     const [students, total] = await Promise.all([
         Student.find(filter)
-            .populate('teacherId', 'name email city')
+            .populate('teacherId', 'name email city googleMeetLink')
             .skip(skip)
             .limit(limit)
             .sort({ createdAt: -1 }),
@@ -70,7 +70,7 @@ const getAllClasses = asyncHandler(async (req, res) => {
 
     const [classes, total] = await Promise.all([
         Class.find(filter)
-            .populate('teacherId', 'name email')
+            .populate('teacherId', 'name email googleMeetLink')
             .populate('studentId', 'name class')
             .skip(skip)
             .limit(limit)

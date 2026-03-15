@@ -48,7 +48,7 @@ const getAllClasses = asyncHandler(async (req, res) => {
 
     const [classes, total] = await Promise.all([
         Class.find(filter)
-            .populate('teacherId', 'name email')
+            .populate('teacherId', 'name email googleMeetLink')
             .populate('studentId', 'name class')
             .skip(skip)
             .limit(limit)
@@ -70,7 +70,7 @@ const getClassById = asyncHandler(async (req, res) => {
     const filter = await getScopeFilter(req.user, { _id: req.params.id });
 
     const classItem = await Class.findOne(filter)
-        .populate('teacherId', 'name email')
+        .populate('teacherId', 'name email googleMeetLink')
         .populate('studentId', 'name class');
 
     if (!classItem) {
