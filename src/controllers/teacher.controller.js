@@ -67,9 +67,11 @@ const updateTeacher = asyncHandler(async (req, res) => {
         return sendError(res, 'You can only update your own profile.', 403);
     }
 
-    // Fields that cannot be updated via this endpoint
-    const forbidden = ['password', 'role', 'email'];
-    forbidden.forEach((field) => delete req.body[field]);
+    // Fields that cannot be updated by a teacher
+    if (req.user.role === 'teacher') {
+        const forbidden = ['password', 'role', 'email'];
+        forbidden.forEach((field) => delete req.body[field]);
+    }
 
     const teacher = await User.findOneAndUpdate(
         { _id: id, role: 'teacher' },
@@ -84,4 +86,52 @@ const updateTeacher = asyncHandler(async (req, res) => {
     return sendSuccess(res, { teacher }, 'Teacher updated successfully');
 });
 
-module.exports = { getAllTeachers, getTeacherById, updateTeacher };
+/**
+ * @route   DELETE /api/teachers/:id
+ * @desc    Delete teacher profile. Admin / Super Admin only.
+ * @access  Private [admin, super_admin]
+ */
+const deleteTeacher = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const teacher = await User.findOneAndDelete({ _id: id, role: 'teacher' });
+
+    if (!teacher) {
+        return sendError(res, 'Teacher not found.', 404);
+    }
+    return sendSuccess(res, null, 'Teacher deleted successfully');
+});
+
+/**
+ * @route   PATCH /api/teachers/:id/change-password
+ * @desc    Change teacher password
+ * @access  Private [admin, super_admin, teacher(self)]
+ */
+const changePassword = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { currentPassword, newPassword } = req.body;
+
+    // Teacher can only update their own password
+    if (req.user.role === 'teacher' && req.user._id.toString() !== id) {
+        return sendError(res, 'You can only update your own password.', 403);
+    }
+
+    const user = await User.findById(id).select('+password');
+    if (!user) {
+        return sendError(res, 'Teacher not found.', 404);
+    }
+
+    // Verify current password
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+        return sendError(res, 'Invalid current password.', 400);
+    }
+
+    // Update password
+    user.password = newPassword;
+    await user.save();
+
+    return sendSuccess(res, null, 'Password updated successfully');
+});
+
+module.exports = { getAllTeachers, getTeacherById, updateTeacher, deleteTeacher, changePassword };
