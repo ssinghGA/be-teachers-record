@@ -117,4 +117,87 @@ const deleteClass = asyncHandler(async (req, res) => {
     return sendSuccess(res, null, 'Class deleted successfully');
 });
 
-module.exports = { createClass, getAllClasses, getClassById, updateClass, deleteClass };
+/**
+ * @route   POST /api/classes/join
+ * @access  Private
+ */
+const joinClass = asyncHandler(async (req, res) => {
+    const { classId } = req.body;
+    if (!classId) return sendError(res, 'classId is required', 400);
+
+    const filter = await getScopeFilter(req.user, { _id: classId });
+    const classItem = await Class.findOne(filter);
+
+    if (!classItem) {
+        return sendError(res, 'Class not found or access denied.', 404);
+    }
+
+    // Add user to joinLogs if not already joined in this session
+    classItem.joinLogs.push({
+        userId: req.user._id,
+        joinedAt: new Date(),
+    });
+
+    // Student logic vs Teachers logic
+    // Even if student joined, we mark it conducted because at least one student joined. Or we evaluate at the end of class.
+    // The prompt: "mark class as 'conducted': true if teacher clicked Start Class OR at least one student joined"
+    // So we can update conducted to true if it's not already.
+    classItem.conducted = true;
+
+    await classItem.save();
+
+    return sendSuccess(res, { class: classItem }, 'Joined class successfully');
+});
+
+/**
+ * @route   POST /api/classes/start
+ * @access  Private [Teacher only]
+ */
+const startClass = asyncHandler(async (req, res) => {
+    const { classId } = req.body;
+    if (!classId) return sendError(res, 'classId is required', 400);
+
+    const filter = await getScopeFilter(req.user, { _id: classId });
+    const classItem = await Class.findOne(filter);
+
+    if (!classItem) {
+        return sendError(res, 'Class not found or access denied.', 404);
+    }
+
+    classItem.status = 'ongoing';
+    classItem.actualStartTime = new Date();
+    classItem.conducted = true; // explicitly mark as conducted
+    await classItem.save();
+
+    return sendSuccess(res, { class: classItem }, 'Class started successfully');
+});
+
+/**
+ * @route   POST /api/classes/end
+ * @access  Private [Teacher only]
+ */
+const endClass = asyncHandler(async (req, res) => {
+    const { classId } = req.body;
+    if (!classId) return sendError(res, 'classId is required', 400);
+
+    const filter = await getScopeFilter(req.user, { _id: classId });
+    const classItem = await Class.findOne(filter);
+
+    if (!classItem) {
+        return sendError(res, 'Class not found or access denied.', 404);
+    }
+
+    classItem.status = 'completed';
+    classItem.actualEndTime = new Date();
+    
+    // Evaluate missed vs conducted. It might have been marked true already above.
+    if (!classItem.conducted) {
+        classItem.missed = true;
+    }
+
+    await classItem.save();
+
+    return sendSuccess(res, { class: classItem }, 'Class ended successfully');
+});
+
+module.exports = { createClass, getAllClasses, getClassById, updateClass, deleteClass, joinClass, startClass, endClass };
