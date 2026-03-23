@@ -42,9 +42,28 @@ const classSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ['scheduled', 'completed', 'cancelled', 'rescheduled'],
+            enum: ['scheduled', 'ongoing', 'completed', 'cancelled', 'rescheduled'],
             default: 'scheduled',
         },
+        conducted: {
+            type: Boolean,
+            default: false,
+        },
+        missed: {
+            type: Boolean,
+            default: false,
+        },
+        actualStartTime: {
+            type: Date,
+        },
+        actualEndTime: {
+            type: Date,
+        },
+        studentJoins: [{
+            studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
+            joinedAt: { type: Date, default: Date.now }
+        }],
+        createdAt: { type: Date, default: Date.now },
     },
     {
         timestamps: true,

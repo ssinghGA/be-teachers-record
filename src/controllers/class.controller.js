@@ -31,8 +31,17 @@ const createClass = asyncHandler(async (req, res) => {
         return sendError(res, 'teacherId is required.', 400);
     }
 
+    // If amount is not provided, fetch it from the student's feePerClass
+    let finalAmount = amount;
+    if (finalAmount === undefined || finalAmount === null) {
+        const student = await Student.findById(studentId);
+        if (student) {
+            finalAmount = student.feePerClass;
+        }
+    }
+
     const newClass = await Class.create({
-        teacherId, studentId, subject, topic, date, time, duration, amount, notes, status,
+        teacherId, studentId, subject, topic, date, time, duration, amount: finalAmount || 0, notes, status,
     });
 
     return sendSuccess(res, { class: newClass }, 'Class created successfully', 201);
@@ -117,4 +126,99 @@ const deleteClass = asyncHandler(async (req, res) => {
     return sendSuccess(res, null, 'Class deleted successfully');
 });
 
-module.exports = { createClass, getAllClasses, getClassById, updateClass, deleteClass };
+/**
+ * @route   POST /api/classes/start
+ * @access  Private [Teacher]
+ */
+const startClass = asyncHandler(async (req, res) => {
+    const { classId } = req.body;
+    const classItem = await Class.findById(classId);
+
+    if (!classItem) {
+        return sendError(res, 'Class not found.', 404);
+    }
+
+    if (req.user.role === 'teacher' && classItem.teacherId.toString() !== req.user._id.toString()) {
+        return sendError(res, 'Access denied.', 403);
+    }
+
+    classItem.status = 'ongoing';
+    classItem.actualStartTime = new Date();
+    classItem.conducted = true;
+    await classItem.save();
+
+    return sendSuccess(res, { class: classItem }, 'Class started successfully');
+});
+
+/**
+ * @route   POST /api/classes/end
+ * @access  Private [Teacher]
+ */
+const endClass = asyncHandler(async (req, res) => {
+    const { classId } = req.body;
+    const classItem = await Class.findById(classId);
+
+    if (!classItem) {
+        return sendError(res, 'Class not found.', 404);
+    }
+
+    if (req.user.role === 'teacher' && classItem.teacherId.toString() !== req.user._id.toString()) {
+        return sendError(res, 'Access denied.', 403);
+    }
+
+    classItem.status = 'completed';
+    classItem.actualEndTime = new Date();
+    await classItem.save();
+
+    return sendSuccess(res, { class: classItem }, 'Class ended successfully');
+});
+
+/**
+ * @route   POST /api/classes/join
+ * @access  Private [Student]
+ */
+const joinClass = asyncHandler(async (req, res) => {
+    const { classId } = req.body;
+    
+    // Find the student linked to this user
+    const student = await Student.findOne({ userId: req.user._id });
+    if (!student) {
+        return sendError(res, 'Student record not found.', 404);
+    }
+
+    const classItem = await Class.findById(classId);
+    if (!classItem) {
+        return sendError(res, 'Class not found.', 404);
+    }
+
+    // Verify student is assigned to this class
+    if (classItem.studentId.toString() !== student._id.toString()) {
+        return sendError(res, 'You are not assigned to this class.', 403);
+    }
+
+    // Add to join history if not already there (or every time if we want to track multiple joins)
+    classItem.studentJoins.push({
+        studentId: student._id,
+        joinedAt: new Date()
+    });
+
+    // If student joins, mark as conducted
+    classItem.conducted = true;
+    
+    // Status will only be updated by the teacher manually now.
+
+    await classItem.save();
+
+    return sendSuccess(res, { class: classItem }, 'Joined class successfully');
+});
+
+module.exports = { 
+    createClass, 
+    getAllClasses, 
+    getClassById, 
+    updateClass, 
+    deleteClass, 
+    startClass, 
+    endClass,
+    joinClass
+};
