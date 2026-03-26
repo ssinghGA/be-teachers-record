@@ -1,6 +1,6 @@
 const express = require('express');
 const {
-    createStudent, getAllStudents, getStudentById, updateStudent, deleteStudent, checkStudentEmail
+    createStudent, getAllStudents, getStudentById, updateStudent, deleteStudent, checkStudentEmail, changeStudentPassword
 } = require('../controllers/student.controller');
 const { authenticate } = require('../middleware/auth.middleware');
 
@@ -10,6 +10,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.post('/check-email', checkStudentEmail);
+router.post('/change-password', changeStudentPassword);
 
 router.post('/', createStudent);
 router.get('/', getAllStudents);

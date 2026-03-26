@@ -55,13 +55,28 @@ const getAllClasses = asyncHandler(async (req, res) => {
     const { page, limit, skip } = getPagination(req.query);
     const filter = await getScopeFilter(req.user, req.query);
 
+    if (req.query.search) {
+        const regex = new RegExp(req.query.search, 'i');
+        filter.$or = [
+            { topic: regex },
+            { subject: regex }
+        ];
+    }
+
+    if (req.query.subject) {
+        filter.subject = new RegExp(req.query.subject, 'i');
+    }
+
+    const sortBy = req.query.sortBy || 'createdAt';
+    const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+
     const [classes, total] = await Promise.all([
         Class.find(filter)
             .populate('teacherId', 'name email googleMeetLink')
             .populate('studentId', 'name class')
             .skip(skip)
             .limit(limit)
-            .sort({ date: -1 }),
+            .sort({ [sortBy]: sortOrder }),
         Class.countDocuments(filter),
     ]);
 
@@ -212,6 +227,49 @@ const joinClass = asyncHandler(async (req, res) => {
     return sendSuccess(res, { class: classItem }, 'Joined class successfully');
 });
 
+/**
+ * @route   POST /api/classes/bulk
+ * @access  Private [Teacher/Admin]
+ */
+const bulkCreateClasses = asyncHandler(async (req, res) => {
+    const { studentId, subject, topic, classes, duration, amount, notes } = req.body;
+
+    if (!studentId || !classes || !Array.isArray(classes) || classes.length === 0) {
+        return sendError(res, 'studentId and classes array are required.', 400);
+    }
+
+    const teacherId = req.user.role === 'teacher' ? req.user._id : req.body.teacherId;
+    if (!teacherId) {
+        return sendError(res, 'teacherId is required.', 400);
+    }
+
+    // Fetch student to get default fee if amount is not provided
+    let defaultAmount = amount;
+    if (defaultAmount === undefined || defaultAmount === null) {
+        const student = await Student.findById(studentId);
+        if (student) {
+            defaultAmount = student.feePerClass;
+        }
+    }
+
+    const createdClasses = await Class.insertMany(
+        classes.map(c => ({
+            teacherId,
+            studentId,
+            subject,
+            topic,
+            date: c.date,
+            time: c.time,
+            duration: duration || 60,
+            amount: defaultAmount || 0,
+            notes,
+            status: 'scheduled'
+        }))
+    );
+
+    return sendSuccess(res, { classes: createdClasses }, `${createdClasses.length} classes scheduled successfully`, 201);
+});
+
 module.exports = { 
     createClass, 
     getAllClasses, 
@@ -220,5 +278,6 @@ module.exports = {
     deleteClass, 
     startClass, 
     endClass,
-    joinClass
+    joinClass,
+    bulkCreateClasses
 };

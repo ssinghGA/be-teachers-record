@@ -141,17 +141,29 @@ const getStudentById = asyncHandler(async (req, res) => {
 const updateStudent = asyncHandler(async (req, res) => {
     const filter = await getScopeFilter(req.user, { _id: req.params.id });
 
+    // Extract password to handle separately as it's in the User model
+    const { password, ...updateData } = req.body;
+
     // Prevent reassigning teacherId by a teacher
-    if (req.user.role === 'teacher') delete req.body.teacherId;
+    if (req.user.role === 'teacher') delete updateData.teacherId;
 
     const student = await Student.findOneAndUpdate(
         filter,
-        { $set: req.body },
+        { $set: updateData },
         { new: true, runValidators: true }
     );
 
     if (!student) {
         return sendError(res, 'Student not found or access denied.', 404);
+    }
+
+    // Handle password update if password is provided
+    if (password && student.userId) {
+        const user = await User.findById(student.userId);
+        if (user) {
+            user.password = password;
+            await user.save();
+        }
     }
 
     return sendSuccess(res, { student }, 'Student updated successfully');
@@ -173,4 +185,45 @@ const deleteStudent = asyncHandler(async (req, res) => {
     return sendSuccess(res, null, 'Student deleted successfully');
 });
 
-module.exports = { createStudent, getAllStudents, getStudentById, updateStudent, deleteStudent, checkStudentEmail };
+/**
+ * @route   POST /api/students/change-password
+ * @desc    Change student password by email
+ * @access  Private [student, teacher, super_admin, admin]
+ */
+const changeStudentPassword = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        return sendError(res, 'Email and new password are required.', 400);
+    }
+
+    const user = await User.findOne({ email, role: 'student' });
+    if (!user) {
+        return sendError(res, 'Student account not found with this email.', 404);
+    }
+
+    // Permission check
+    const requester = req.user;
+    if (requester.role === 'super_admin' || requester.role === 'admin') {
+        // Full access for admins
+    } else if (requester.role === 'student') {
+        // Students can only change their own
+        if (requester.email !== email) {
+            return sendError(res, 'You can only change your own password.', 403);
+        }
+    } else if (requester.role === 'teacher') {
+        // Verifying student is taught by this teacher
+        const studentRecord = await Student.findOne({ userId: user._id, teacherId: requester._id });
+        if (!studentRecord) {
+            return sendError(res, 'Access denied: This student is not assigned to you.', 403);
+        }
+    } else {
+        return sendError(res, 'Permission denied.', 403);
+    }
+
+    user.password = password;
+    await user.save();
+
+    return sendSuccess(res, null, 'Password changed successfully');
+});
+
+module.exports = { createStudent, getAllStudents, getStudentById, updateStudent, deleteStudent, checkStudentEmail, changeStudentPassword };
