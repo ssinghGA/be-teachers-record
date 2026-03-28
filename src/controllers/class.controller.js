@@ -6,16 +6,33 @@ const { buildFilter } = require('../utils/filter.util');
 const asyncHandler = require('../utils/asyncHandler.util');
 
 const getScopeFilter = async (user, query) => {
-    const filter = buildFilter(query, 'date');
+    // Start with a clone of query to preserve fields like _id
+    const filter = { ...query };
+    
+    // Apply standard filters (date range, etc.)
+    const standardFilters = buildFilter(query, 'date');
+    Object.assign(filter, standardFilters);
+
     if (user.role === 'teacher') {
         filter.teacherId = user._id;
     } else if (user.role === 'student') {
         const students = await Student.find({ userId: user._id });
         if (students.length > 0) filter.studentId = { $in: students.map(s => s._id) };
-        else filter.studentId = null; 
-    } else if (query.teacherId) {
+        else filter.studentId = null;
+    } else if (query.teacherId && require('mongoose').Types.ObjectId.isValid(query.teacherId)) {
         filter.teacherId = query.teacherId;
     }
+
+    // Clean up transient query params that shouldn't be in the final filter
+    delete filter.startDate;
+    delete filter.endDate;
+    delete filter.date;
+    delete filter.search;
+    delete filter.page;
+    delete filter.limit;
+    delete filter.sortBy;
+    delete filter.sortOrder;
+
     return filter;
 };
 
@@ -31,8 +48,17 @@ const createClass = asyncHandler(async (req, res) => {
         return sendError(res, 'teacherId is required.', 400);
     }
 
+    // If amount is not provided, fetch it from the student's feePerClass
+    let finalAmount = amount;
+    if (finalAmount === undefined || finalAmount === null) {
+        const student = await Student.findById(studentId);
+        if (student) {
+            finalAmount = student.feePerClass;
+        }
+    }
+
     const newClass = await Class.create({
-        teacherId, studentId, subject, topic, date, time, duration, amount, notes, status,
+        teacherId, studentId, subject, topic, date, time, duration, amount: finalAmount || 0, notes, status,
     });
 
     return sendSuccess(res, { class: newClass }, 'Class created successfully', 201);
@@ -46,13 +72,28 @@ const getAllClasses = asyncHandler(async (req, res) => {
     const { page, limit, skip } = getPagination(req.query);
     const filter = await getScopeFilter(req.user, req.query);
 
+    if (req.query.search) {
+        const regex = new RegExp(req.query.search, 'i');
+        filter.$or = [
+            { topic: regex },
+            { subject: regex }
+        ];
+    }
+
+    if (req.query.subject) {
+        filter.subject = new RegExp(req.query.subject, 'i');
+    }
+
+    const sortBy = req.query.sortBy || 'createdAt';
+    const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+
     const [classes, total] = await Promise.all([
         Class.find(filter)
             .populate('teacherId', 'name email googleMeetLink')
             .populate('studentId', 'name class')
             .skip(skip)
             .limit(limit)
-            .sort({ date: -1 }),
+            .sort({ [sortBy]: sortOrder }),
         Class.countDocuments(filter),
     ]);
 
@@ -118,46 +159,36 @@ const deleteClass = asyncHandler(async (req, res) => {
 });
 
 /**
- * @route   POST /api/classes/join
- * @access  Private
+ * @route   POST /api/classes/bulk
+ * @access  Private [Admin/Teacher]
  */
-const joinClass = asyncHandler(async (req, res) => {
-    const { classId } = req.body;
-    if (!classId) return sendError(res, 'classId is required', 400);
-
-    const filter = await getScopeFilter(req.user, { _id: classId });
-    const classItem = await Class.findOne(filter);
-
-    if (!classItem) {
-        return sendError(res, 'Class not found or access denied.', 404);
+const bulkCreateClasses = asyncHandler(async (req, res) => {
+    const { classes } = req.body;
+    if (!Array.isArray(classes)) {
+        return sendError(res, 'Invalid request. "classes" must be an array.', 400);
     }
 
-    // Add user to joinLogs if not already joined in this session
-    classItem.joinLogs.push({
-        userId: req.user._id,
-        joinedAt: new Date(),
-    });
+    const teacherId = req.user.role === 'teacher' ? req.user._id : null;
+    
+    const preparedClasses = classes.map(c => ({
+        ...c,
+        teacherId: teacherId || c.teacherId || req.user._id,
+        status: c.status || 'scheduled'
+    }));
 
-    // Student logic vs Teachers logic
-    // Even if student joined, we mark it conducted because at least one student joined. Or we evaluate at the end of class.
-    // The prompt: "mark class as 'conducted': true if teacher clicked Start Class OR at least one student joined"
-    // So we can update conducted to true if it's not already.
-    classItem.conducted = true;
-
-    await classItem.save();
-
-    return sendSuccess(res, { class: classItem }, 'Joined class successfully');
+    const createdClasses = await Class.insertMany(preparedClasses);
+    return sendSuccess(res, { classes: createdClasses }, `${createdClasses.length} classes created successfully`, 201);
 });
 
 /**
- * @route   POST /api/classes/start
- * @access  Private [Teacher only]
+ * @route   POST /api/classes/start or /api/classes/:id/start
+ * @access  Private [Teacher]
  */
 const startClass = asyncHandler(async (req, res) => {
-    const { classId } = req.body;
-    if (!classId) return sendError(res, 'classId is required', 400);
+    const id = req.params.id || req.body.classId || req.body.id;
+    if (!id) return sendError(res, 'Class ID is required.', 400);
 
-    const filter = await getScopeFilter(req.user, { _id: classId });
+    const filter = await getScopeFilter(req.user, { _id: id });
     const classItem = await Class.findOne(filter);
 
     if (!classItem) {
@@ -166,21 +197,21 @@ const startClass = asyncHandler(async (req, res) => {
 
     classItem.status = 'ongoing';
     classItem.actualStartTime = new Date();
-    classItem.conducted = true; // explicitly mark as conducted
+    classItem.conducted = true;
     await classItem.save();
 
-    return sendSuccess(res, { class: classItem }, 'Class started successfully');
+    return sendSuccess(res, { class: classItem }, 'Class marked as ongoing.');
 });
 
 /**
- * @route   POST /api/classes/end
- * @access  Private [Teacher only]
+ * @route   POST /api/classes/end or /api/classes/:id/end
+ * @access  Private [Teacher]
  */
 const endClass = asyncHandler(async (req, res) => {
-    const { classId } = req.body;
-    if (!classId) return sendError(res, 'classId is required', 400);
+    const id = req.params.id || req.body.classId || req.body.id;
+    if (!id) return sendError(res, 'Class ID is required.', 400);
 
-    const filter = await getScopeFilter(req.user, { _id: classId });
+    const filter = await getScopeFilter(req.user, { _id: id });
     const classItem = await Class.findOne(filter);
 
     if (!classItem) {
@@ -189,15 +220,46 @@ const endClass = asyncHandler(async (req, res) => {
 
     classItem.status = 'completed';
     classItem.actualEndTime = new Date();
-    
-    // Evaluate missed vs conducted. It might have been marked true already above.
-    if (!classItem.conducted) {
-        classItem.missed = true;
-    }
-
     await classItem.save();
 
-    return sendSuccess(res, { class: classItem }, 'Class ended successfully');
+    return sendSuccess(res, { class: classItem }, 'Class marked as completed.');
 });
 
-module.exports = { createClass, getAllClasses, getClassById, updateClass, deleteClass, joinClass, startClass, endClass };
+/**
+ * @route   POST /api/classes/join or /api/classes/:id/join
+ * @access  Private [Student]
+ */
+const joinClass = asyncHandler(async (req, res) => {
+    const id = req.params.id || req.body.classId || req.body.id;
+    if (!id) return sendError(res, 'Class ID is required.', 400);
+
+    // Filter to ensure student can only join classes they are assigned to
+    const filter = await getScopeFilter(req.user, { _id: id });
+    const classItem = await Class.findOne(filter);
+
+    if (!classItem) {
+        return sendError(res, 'Class not found or access denied.', 404);
+    }
+
+    // Add entry to studentJoins
+    const studentId = req.user.role === 'student' ? req.user._id : req.body.studentId;
+    classItem.studentJoins.push({
+        studentId,
+        joinedAt: new Date()
+    });
+    
+    await classItem.save();
+    return sendSuccess(res, { class: classItem }, 'Joined class successfully.');
+});
+
+module.exports = { 
+    createClass, 
+    getAllClasses, 
+    getClassById, 
+    updateClass, 
+    deleteClass,
+    startClass,
+    endClass,
+    joinClass,
+    bulkCreateClasses
+};

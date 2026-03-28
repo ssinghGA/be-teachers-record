@@ -59,18 +59,11 @@ const classSchema = new mongoose.Schema(
         actualEndTime: {
             type: Date,
         },
-        joinLogs: [
-            {
-                userId: {
-                    type: mongoose.Schema.Types.ObjectId,
-                    ref: 'User',
-                },
-                joinedAt: {
-                    type: Date,
-                    default: Date.now,
-                },
-            },
-        ],
+        studentJoins: [{
+            studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
+            joinedAt: { type: Date, default: Date.now }
+        }],
+        createdAt: { type: Date, default: Date.now },
     },
     {
         timestamps: true,

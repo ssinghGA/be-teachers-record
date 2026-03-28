@@ -10,6 +10,7 @@ const classRoutes = require('./routes/class.routes');
 const reportRoutes = require('./routes/report.routes');
 const paymentRoutes = require('./routes/payment.routes');
 const adminRoutes = require('./routes/admin.routes');
+const homeworkRoutes = require('./routes/homework.routes');
 const errorHandler = require('./middleware/errorHandler.middleware');
 const { sendError } = require('./utils/response.util');
 
@@ -40,6 +41,7 @@ app.use('/api/classes', classRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/homework', homeworkRoutes);
 
 // ─── 404 Handler ────────────────────────────────────────────────────────────
 app.use((req, res) => {
