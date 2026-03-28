@@ -6,16 +6,33 @@ const { buildFilter } = require('../utils/filter.util');
 const asyncHandler = require('../utils/asyncHandler.util');
 
 const getScopeFilter = async (user, query) => {
-    const filter = buildFilter(query, 'date');
+    // Start with a clone of query to preserve fields like _id
+    const filter = { ...query };
+    
+    // Apply standard filters (date range, etc.)
+    const standardFilters = buildFilter(query, 'date');
+    Object.assign(filter, standardFilters);
+
     if (user.role === 'teacher') {
         filter.teacherId = user._id;
     } else if (user.role === 'student') {
         const students = await Student.find({ userId: user._id });
         if (students.length > 0) filter.studentId = { $in: students.map(s => s._id) };
-        else filter.studentId = null; 
-    } else if (query.teacherId) {
+        else filter.studentId = null;
+    } else if (query.teacherId && require('mongoose').Types.ObjectId.isValid(query.teacherId)) {
         filter.teacherId = query.teacherId;
     }
+
+    // Clean up transient query params that shouldn't be in the final filter
+    delete filter.startDate;
+    delete filter.endDate;
+    delete filter.date;
+    delete filter.search;
+    delete filter.page;
+    delete filter.limit;
+    delete filter.sortBy;
+    delete filter.sortOrder;
+
     return filter;
 };
 
@@ -142,19 +159,40 @@ const deleteClass = asyncHandler(async (req, res) => {
 });
 
 /**
- * @route   POST /api/classes/start
+ * @route   POST /api/classes/bulk
+ * @access  Private [Admin/Teacher]
+ */
+const bulkCreateClasses = asyncHandler(async (req, res) => {
+    const { classes } = req.body;
+    if (!Array.isArray(classes)) {
+        return sendError(res, 'Invalid request. "classes" must be an array.', 400);
+    }
+
+    const teacherId = req.user.role === 'teacher' ? req.user._id : null;
+    
+    const preparedClasses = classes.map(c => ({
+        ...c,
+        teacherId: teacherId || c.teacherId || req.user._id,
+        status: c.status || 'scheduled'
+    }));
+
+    const createdClasses = await Class.insertMany(preparedClasses);
+    return sendSuccess(res, { classes: createdClasses }, `${createdClasses.length} classes created successfully`, 201);
+});
+
+/**
+ * @route   POST /api/classes/start or /api/classes/:id/start
  * @access  Private [Teacher]
  */
 const startClass = asyncHandler(async (req, res) => {
-    const { classId } = req.body;
-    const classItem = await Class.findById(classId);
+    const id = req.params.id || req.body.classId || req.body.id;
+    if (!id) return sendError(res, 'Class ID is required.', 400);
+
+    const filter = await getScopeFilter(req.user, { _id: id });
+    const classItem = await Class.findOne(filter);
 
     if (!classItem) {
-        return sendError(res, 'Class not found.', 404);
-    }
-
-    if (req.user.role === 'teacher' && classItem.teacherId.toString() !== req.user._id.toString()) {
-        return sendError(res, 'Access denied.', 403);
+        return sendError(res, 'Class not found or access denied.', 404);
     }
 
     classItem.status = 'ongoing';
@@ -162,112 +200,56 @@ const startClass = asyncHandler(async (req, res) => {
     classItem.conducted = true;
     await classItem.save();
 
-    return sendSuccess(res, { class: classItem }, 'Class started successfully');
+    return sendSuccess(res, { class: classItem }, 'Class marked as ongoing.');
 });
 
 /**
- * @route   POST /api/classes/end
+ * @route   POST /api/classes/end or /api/classes/:id/end
  * @access  Private [Teacher]
  */
 const endClass = asyncHandler(async (req, res) => {
-    const { classId } = req.body;
-    const classItem = await Class.findById(classId);
+    const id = req.params.id || req.body.classId || req.body.id;
+    if (!id) return sendError(res, 'Class ID is required.', 400);
+
+    const filter = await getScopeFilter(req.user, { _id: id });
+    const classItem = await Class.findOne(filter);
 
     if (!classItem) {
-        return sendError(res, 'Class not found.', 404);
-    }
-
-    if (req.user.role === 'teacher' && classItem.teacherId.toString() !== req.user._id.toString()) {
-        return sendError(res, 'Access denied.', 403);
+        return sendError(res, 'Class not found or access denied.', 404);
     }
 
     classItem.status = 'completed';
     classItem.actualEndTime = new Date();
     await classItem.save();
 
-    return sendSuccess(res, { class: classItem }, 'Class ended successfully');
+    return sendSuccess(res, { class: classItem }, 'Class marked as completed.');
 });
 
 /**
- * @route   POST /api/classes/join
+ * @route   POST /api/classes/join or /api/classes/:id/join
  * @access  Private [Student]
  */
 const joinClass = asyncHandler(async (req, res) => {
-    const { classId } = req.body;
-    
-    // Find the student linked to this user
-    const student = await Student.findOne({ userId: req.user._id });
-    if (!student) {
-        return sendError(res, 'Student record not found.', 404);
-    }
+    const id = req.params.id || req.body.classId || req.body.id;
+    if (!id) return sendError(res, 'Class ID is required.', 400);
 
-    const classItem = await Class.findById(classId);
+    // Filter to ensure student can only join classes they are assigned to
+    const filter = await getScopeFilter(req.user, { _id: id });
+    const classItem = await Class.findOne(filter);
+
     if (!classItem) {
-        return sendError(res, 'Class not found.', 404);
+        return sendError(res, 'Class not found or access denied.', 404);
     }
 
-    // Verify student is assigned to this class
-    if (classItem.studentId.toString() !== student._id.toString()) {
-        return sendError(res, 'You are not assigned to this class.', 403);
-    }
-
-    // Add to join history if not already there (or every time if we want to track multiple joins)
+    // Add entry to studentJoins
+    const studentId = req.user.role === 'student' ? req.user._id : req.body.studentId;
     classItem.studentJoins.push({
-        studentId: student._id,
+        studentId,
         joinedAt: new Date()
     });
-
-    // If student joins, mark as conducted
-    classItem.conducted = true;
     
-    // Status will only be updated by the teacher manually now.
-
     await classItem.save();
-
-    return sendSuccess(res, { class: classItem }, 'Joined class successfully');
-});
-
-/**
- * @route   POST /api/classes/bulk
- * @access  Private [Teacher/Admin]
- */
-const bulkCreateClasses = asyncHandler(async (req, res) => {
-    const { studentId, subject, topic, classes, duration, amount, notes } = req.body;
-
-    if (!studentId || !classes || !Array.isArray(classes) || classes.length === 0) {
-        return sendError(res, 'studentId and classes array are required.', 400);
-    }
-
-    const teacherId = req.user.role === 'teacher' ? req.user._id : req.body.teacherId;
-    if (!teacherId) {
-        return sendError(res, 'teacherId is required.', 400);
-    }
-
-    // Fetch student to get default fee if amount is not provided
-    let defaultAmount = amount;
-    if (defaultAmount === undefined || defaultAmount === null) {
-        const student = await Student.findById(studentId);
-        if (student) {
-            defaultAmount = student.feePerClass;
-        }
-    }
-
-    const createdClasses = await Class.insertMany(
-        classes.map(c => ({
-            teacherId,
-            studentId,
-            subject,
-            topic,
-            date: c.date,
-            time: c.time,
-            duration: duration || 60,
-            amount: defaultAmount || 0,
-            notes,
-            status: 'scheduled'
-        }))
-    );
-
-    return sendSuccess(res, { classes: createdClasses }, `${createdClasses.length} classes scheduled successfully`, 201);
+    return sendSuccess(res, { class: classItem }, 'Joined class successfully.');
 });
 
 module.exports = { 
@@ -275,8 +257,8 @@ module.exports = {
     getAllClasses, 
     getClassById, 
     updateClass, 
-    deleteClass, 
-    startClass, 
+    deleteClass,
+    startClass,
     endClass,
     joinClass,
     bulkCreateClasses

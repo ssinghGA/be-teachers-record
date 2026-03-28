@@ -177,11 +177,18 @@ const updateStudent = asyncHandler(async (req, res) => {
 const deleteStudent = asyncHandler(async (req, res) => {
     const filter = await getScopeFilter(req.user, { _id: req.params.id });
 
-    const student = await Student.findOneAndDelete(filter);
-    if (!student) {
+    // Find the student first to check status
+    const studentExists = await Student.findOne(filter);
+    if (!studentExists) {
         return sendError(res, 'Student not found or access denied.', 404);
     }
 
+    // Check if student is active
+    if (studentExists.status === 'active') {
+        return sendError(res, 'Student is active and cannot be deleted. Deactivate first.', 400);
+    }
+
+    const student = await Student.findOneAndDelete(filter);
     return sendSuccess(res, null, 'Student deleted successfully');
 });
 
