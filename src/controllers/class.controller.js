@@ -163,18 +163,29 @@ const deleteClass = asyncHandler(async (req, res) => {
  * @access  Private [Admin/Teacher]
  */
 const bulkCreateClasses = asyncHandler(async (req, res) => {
-    const { classes } = req.body;
+    const { classes, studentId, subject, duration, amount, notes, teacherId: bodyTeacherId } = req.body;
     if (!Array.isArray(classes)) {
         return sendError(res, 'Invalid request. "classes" must be an array.', 400);
     }
 
-    const teacherId = req.user.role === 'teacher' ? req.user._id : null;
+    const teacherId = req.user.role === 'teacher' ? req.user._id : bodyTeacherId;
     
     const preparedClasses = classes.map(c => ({
+        studentId: studentId || c.studentId,
+        subject: subject || c.subject,
+        duration: duration || c.duration,
+        amount: amount || (c.amount !== undefined ? c.amount : 0),
+        notes: notes || c.notes,
         ...c,
-        teacherId: teacherId || c.teacherId || req.user._id,
+        teacherId: teacherId || c.teacherId || (req.user.role === 'teacher' ? req.user._id : null),
         status: c.status || 'scheduled'
     }));
+
+    // Ensure all prepared classes have a teacherId
+    const missingTeacher = preparedClasses.some(c => !c.teacherId);
+    if (missingTeacher) {
+        return sendError(res, 'teacherId is required for all classes.', 400);
+    }
 
     const createdClasses = await Class.insertMany(preparedClasses);
     return sendSuccess(res, { classes: createdClasses }, `${createdClasses.length} classes created successfully`, 201);
